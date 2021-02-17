@@ -27,13 +27,6 @@ def train_enir(data_class, data_scores, y_min=0.0, y_max=1.0, no_gaps=False, lap
         new_probabilities = []
         for item, slope in zip(probabilities, slopes):
             new_probabilities.append(item)
-            # if slope != 0 and slope != 1:
-            #     if delta_lambda != 0:
-            #         print("-" * 40)
-            #         print(slope)
-            #         print(new_probabilities[-1]['p'])
-            #         print(delta_lambda)
-            #         print("-" * 40)
             tmp = new_probabilities[-1]['p'] + slope * delta_lambda
             if tmp > 1:
                 print("-" * 40)
@@ -58,10 +51,6 @@ def train_enir(data_class, data_scores, y_min=0.0, y_max=1.0, no_gaps=False, lap
                     print("Anomaly in bin probabilities while merging bins.")
                     print(probabilities[i - 1]['p'])
                     print(probabilities[i]['p'])
-                # else:
-                #     print("No violation")
-                #     print(probabilities[i - 1]['p'])
-                #     print(probabilities[i]['p'])
                 # Merge to previous bin.
                 new_probabilities[-1]['n'] = new_probabilities[-1]['n'] + probabilities[i]['n']
                 new_probabilities[-1]['k'] = new_probabilities[-1]['k'] + probabilities[i]['k']
@@ -156,16 +145,6 @@ def train_enir(data_class, data_scores, y_min=0.0, y_max=1.0, no_gaps=False, lap
     # (this in contrast to ENIR-paper where the authors imply that samples are placed
     # one per bin at start).
 
-    # unique_scores = np.unique(data_scores)
-    # unique_scores = np.sort(unique_scores)
-    # probabilities = []
-    # # THIS IS AN EXTREMELY INEFFICIENT WAY OF ACHIEVING THE RESULT!
-    # # Change this to 1. sort O(n*log(n)) + 2. ordered run through samples O(n)
-    # for score in unique_scores:
-    #     probabilities.append({'p': sum(data_class[data_scores == score]) / sum(data_scores == score),
-    #                           'k': sum(data_class[data_scores == score]), 'n': sum(data_scores == score),
-    #                           'score_min': score, 'score_max': score})
-
     # 1. Sort samples:
     print("Sorting.")
     data_idx = np.argsort(data_scores)
@@ -188,26 +167,6 @@ def train_enir(data_class, data_scores, y_min=0.0, y_max=1.0, no_gaps=False, lap
             probabilities.append({'k': int(item_class), 'n': 1, 'p': float(item_class),
                                   'score_min': item_score, 'score_max': item_score})
     print("Binning done.")
-
-    # This corresponds to first "binning model" with lambda = 0.
-    # Version 2. This corresponds to the pseud-code in Naeini & al, but has to be wrong (IMO).
-    # The problem is that with this approach, equal scoring samples will end up in different bins.
-    # probabilities = []
-    # idx = np.argsort(data_scores)
-    # data_class = data_class[idx]
-    # data_scores = data_scores[idx]
-    # for item_score, item_class in zip(data_scores, data_class):
-    #     probabilities.append({'p': float(item_class), 'n': 1, 'k': int(item_class),
-    #                           'score_min': item_score, 'score_max': item_score})
-
-    # Test 1:
-    # probabilities = [{'p': 0, 'k': 0, 'n': 3},
-    #                  {'p': .4, 'k': 4, 'n': 10},
-    #                  {'p': .9, 'k': 9, 'n': 10},
-    #                  {'p': .5, 'k': 1, 'n': 2}]
-    # for i in range(len(probabilities)):  # Scores don't really matter for this test.
-    #     probabilities[i]['score_min'] = 7
-    #     probabilities[i]['score_max'] = 11
 
     # Set parameters:
     lambda_tmp = 0.0
