@@ -1,5 +1,5 @@
 """
-This will become a version of IR that does _not_ have the bug that exists in
+This is a version of IR that does _not_ have the bug that exists in
 sklearn.isotonic.IsotonicRegression.
 This version should also be fast. It is based on the observation that under
 no circumstances will the borders between IR bins violate, i.e. any violating
@@ -12,8 +12,7 @@ equal scores _must_ map to the same probability in IR.
 my_enir and results in better training set performance than
 sklearn.isotonic.IsotonicRegression.
 -There is probably some optimization to be done, although this version
-runs on dataset 1 (133k training samples) in 8 seconds.
--The version 2 below runs in around one second.
+runs on dataset 1 (133k training samples) in a second.
 """
 
 import numpy as np
@@ -21,10 +20,22 @@ from scipy.interpolate import interp1d
 
 
 def train_ir(data_class, data_scores, no_gaps=False, smoothing=0, include_no_gaps_model=True):
-    # This version of Isotonic Regression is quick and runs in
-    # O(n*log(n)) for the sorting algorithm and O(n) for PAVA.
-    # The biggest slowing factor is probably the removal of elements
-    # from a list using del.
+    """
+    A version of isotonic regression that is reasonably quick and runs in O(n*log(n))
+    for the sorting algorithm and O(n) for PAVA.
+    The biggest slowing factor is probably the removal of elements
+    from a list using del.
+
+    Args:
+    data_class (np.array([])): Array of class-labels for samples.
+    data_scores (np.array([])): Array of floats for samples.
+    smoothing (float): Set to 1 for Lambda-smoothing, 1/2 for Krichesky-Trofimov.
+    no_gaps (bool): With no_gaps set to False, this will produce an isotonic
+     regression model that interpolates between bins. With True, the IR model
+     will be modified so that there are no gaps between bins.
+    include_no_gaps_model (bool): With this set to True, the function will return
+     one IR model with gaps and one without.
+    """
     data_idx = np.argsort(data_scores)
     data_scores = data_scores[data_idx]
     data_class = data_class[data_idx]
@@ -91,6 +102,17 @@ def train_ir(data_class, data_scores, no_gaps=False, smoothing=0, include_no_gap
 
 
 def predict_ir(model, data_scores, use_no_gaps_model=False):
+    """
+    This function predicts probabilities from scores using an IR model.
+
+    Args:
+    model: A model as returned by train_ir().
+    data_scores (np.array([])): An array of scores for samples to be
+     turned into probabilities using the model.
+    use_no_gaps_model (bool): If the model was trained with
+     include_no_gaps_model=True, then this flag can be set to select which
+     model to use for predictions.
+    """
     # Start by predicting using only the last model. The model is an interpolation model.
     if use_no_gaps_model:  # Use model with no gaps.
         probabilities = model['no_gaps_model'](data_scores)
@@ -100,14 +122,25 @@ def predict_ir(model, data_scores, use_no_gaps_model=False):
 
 
 def train_beir(data_class, data_scores, n_models=100, sampling_rate=.95, y_min=1e-3, y_max=1 - 1e-3):
-    # Create a bootstrap ensemble of IR models with model averaging.
-    # Using log-likelihood for model averaging.
+    """
+    Function for creating a bootstrap ensemble of IR models with model averaging using
+    log-likelihood.
+
+    Args:
+    data_class (np.array([bool])): Array of class-labels. True indicates positive.
+    data_scores (np.array([float])): Array of scores for samples.
+    n_models (int): Number of models in ensemble.
+    sampling_rate (float): Fraction of samples to use in one bootstrap iteration. Value
+     in ]0, 1].
+    y_min (float): Smallest value to be predicted by model (capped at this value). 
+     In [0, 1[
+    y_max (float): Largest value to predicted by model. In ]y_min, 1].
+    """
     model = []
     n_samples = len(data_class)
     for i in range(n_models):  # THIS COULD ALSO BE DONE IN PARALLEL WITH pool() or similar.
         # Perhaps say something about progress.
         # Resample data
-        # print("Working on {0} of {1} models.".format(i, n_models))
         idx = np.random.randint(low=0, high=n_samples, size=int(sampling_rate * n_samples))
         tmp_data_class = data_class[idx]
         tmp_data_scores = data_scores[idx]
@@ -145,6 +178,17 @@ def train_beir(data_class, data_scores, n_models=100, sampling_rate=.95, y_min=1
 
 
 def predict_beir(model, data_scores, model_averaging='uniform'):
+    """
+    Function for creating predictions from scores using a BEIR model.
+
+    Args:
+    model: Model as returned by train_beir().
+    data_scores (np.array([float])): Array of scores for samples to turn
+     into probabilities.
+    model_averaging {'uniform', 'log_likelihood'}: Flag to decide whether
+     the model averaging should be done using log-likelihood or uniform
+     weights for models.
+    """
     if model_averaging == 'uniform':
         n_models = len(model)
         probabilities = np.array([item['model']['model'](data_scores) / n_models for item in model]).sum(0)
@@ -152,94 +196,3 @@ def predict_beir(model, data_scores, model_averaging='uniform'):
         normalizing_factor = sum([np.exp(item['relative_log_likelihood']) for item in model])
         probabilities = np.array([item['model']['model'](data_scores) * np.exp(item['relative_log_likelihood']) / normalizing_factor for item in model]).sum(0)
     return(probabilities)
-
-
-# Slow version of IR here. Done faster in train_ir() above.
-# def train_ir_slow(data_class, data_scores, no_gaps=False, smoothing=0, include_no_gaps_model=False):
-#     # Function for training enir model.
-#     # Set 'smoothing' to 1 for Laplace-smoothing or 1/2 for Krichesky-Trofimov
-#     # Perhaps opt for an approach where we allow for a violation only if there are at least
-#     # M samples in a violating bin.
-#     # 1. Sort samples:
-#     data_idx = np.argsort(data_scores)
-#     data_scores = data_scores[data_idx]
-#     data_class = data_class[data_idx]
-#     # 2. Bin samples:
-#     probabilities = [{'k': int(data_class[0]), 'n': 1, 'p': float(data_class[0]),
-#                       'score_min': data_scores[0], 'score_max': data_scores[0]}]
-#     for item_score, item_class in zip(data_scores[1:], data_class[1:]):
-#         if item_score == probabilities[-1]['score_min']:
-#             # Add item to last bin.
-#             probabilities[-1]['k'] = probabilities[-1]['k'] + int(item_class)
-#             probabilities[-1]['n'] = probabilities[-1]['n'] + 1
-#             probabilities[-1]['score_max'] = item_score  # This should also remain constant.
-#             # score_min remains constant for bin.
-#             probabilities[-1]['p'] = float(probabilities[-1]['k']) / float(probabilities[-1]['n'])
-#         else:
-#             # Else, create new bin.
-#             probabilities.append({'k': int(item_class), 'n': 1, 'p': float(item_class),
-#                                   'score_min': item_score, 'score_max': item_score})
-#     if no_gaps:
-#         # Remove gaps from model
-#         for i in range(len(probabilities) - 1):
-#             tmp_score = (probabilities[i]['score_max'] + probabilities[i + 1]['score_min']) / 2
-#             probabilities[i]['score_max'] = tmp_score
-#             probabilities[i + 1]['score_min'] = tmp_score
-
-#     def get_violations(probabilities):
-#         violations = [i for i in range(len(probabilities) - 1) if (probabilities[i]['p'] - probabilities[i + 1]['p']) > 0]
-#         return(np.array(violations))
-
-#     def merge_bins(probabilities, bins_to_merge):
-#         new_probabilities = []
-#         new_probabilities.append(probabilities[0])
-#         for i in range(1, len(probabilities)):
-#             if i in (np.array(bins_to_merge) + 1):  # If previous bin needs to be merged with next.
-#                 new_probabilities[-1]['k'] = new_probabilities[-1]['k'] + probabilities[i]['k']
-#                 new_probabilities[-1]['n'] = new_probabilities[-1]['n'] + probabilities[i]['n']
-#                 new_probabilities[-1]['score_max'] = probabilities[i]['score_max']
-#                 # score_min remains the same
-#                 new_probabilities[-1]['p'] = new_probabilities[-1]['k'] / float(new_probabilities[-1]['n'])
-#             else:
-#                 new_probabilities.append(probabilities[i])
-#         return(new_probabilities)
-
-#     def create_model(probabilities, smoothing=smoothing, y_min=0, y_max=1):
-#         # Create interpolation model for one M.
-#         # NOTE: We might want to change y_min and y_max to e.g. 1e-3 and 1-1e-3.
-#         y = []
-#         x = []
-#         for item in probabilities:
-#             y.append((item['k'] + smoothing) / float(item['n'] + 2 * smoothing))
-#             y.append((item['k'] + smoothing) / float(item['n'] + 2 * smoothing))
-#             x.append(item['score_min'])
-#             x.append(item['score_max'])
-#         model_tmp = model_tmp = interp1d(x=x, y=y, bounds_error=False, assume_sorted=True, fill_value=(y_min, y_max))
-#         return(model_tmp)
-
-#     # Find violating bins:
-#     violations = get_violations(probabilities)
-#     while(len(violations) > 0):
-#         # Merge violating bins. Also merge bins that map to same probabilities.
-#         probabilities = merge_bins(probabilities, violations)
-#         # Find new violations
-#         violations = get_violations(probabilities)
-
-#     # For bic_score, we need to merge bins that have equal probabilities.
-#     equal_probability_bins = [i for i in range(len(probabilities) - 1) if probabilities[i]['p'] == probabilities[i + 1]['p']]
-#     if len(equal_probability_bins) > 0:
-#         probabilities = merge_bins(probabilities, equal_probability_bins)
-
-#     # Create model.
-#     model = create_model(probabilities, smoothing=smoothing)
-
-#     if include_no_gaps_model:
-#         # Make a no-gaps -model.
-#         for i in range(len(probabilities) - 1):
-#             tmp_score = (probabilities[i]['score_max'] + probabilities[i + 1]['score_min']) / 2
-#             probabilities[i]['score_max'] = tmp_score
-#             probabilities[i + 1]['score_min'] = tmp_score
-#         no_gaps_model = create_model(probabilities, smoothing=smoothing)
-#         return({'model': model, 'no_gaps_model': no_gaps_model})
-#     else:
-#         return({'model': model})
