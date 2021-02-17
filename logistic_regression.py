@@ -1,6 +1,6 @@
 """
 Logistic regression
--only focusing on the univariate case with binary class
+-only focusing on the univariate case with binary class, a.k.a Platt-scaling (Platt, 1998).
 -because scipy only provides regularized versions, and because I can.
 """
 
@@ -11,16 +11,24 @@ import numpy as np
 def sigmoid(x):
     return(1 / (1 + np.exp(-x)))
 
-# # Results with learning rate 1, and convergence criteria 1e-6
-# In [217]: isotonic.mean_squared_error(data_class, logistic_probabilities)
-# Out[217]: 0.038820194788117643
-# # Convergence criteria 1e-4
-# In [222]: isotonic.mean_squared_error(data_class, logistic_probabilities)
-# Out[222]: 0.038820050003216117
-# Hence we seen that from MSE perspective, the convergence criterion is not super crucial.
 
-
-def train_logistic_regression(data_class, data_scores, learning_rate=5.0, convergence_criteria=1e-6, max_iterations=1e5):
+def train_logistic_regression(data_class,
+                              data_scores,
+                              learning_rate=5.0,
+                              convergence_criterion=1e-6,
+                              max_iterations=1e5):
+    """
+    Function for training a logistic regression model.
+    
+    Args:
+    data_class (np.array([])): An array of class-labels for samples. True
+     indicates a positive sample.
+    data_scores (np.array([])): An array of floats for samples.
+    leaning_rate (float): Learning rate for the algorithm
+    convergence_criterion (float): If new gradients are below this value, the
+     algorithm will stop
+    max_iterations (int): Maximum number of iterations before stop.
+    """
     # 1. Randomly assign values to b_0 and b_1
     b_0 = gauss(0, 1)
     b_1 = gauss(0, 1)
@@ -40,7 +48,7 @@ def train_logistic_regression(data_class, data_scores, learning_rate=5.0, conver
         if (i == max_iterations):
             print("Max. iterations reached.")
             break
-        elif np.abs(b_0_d) < convergence_criteria and np.abs(b_1_d) < convergence_criteria:
+        elif np.abs(b_0_d) < convergence_criterion and np.abs(b_1_d) < convergence_criterion:
             break
         log_likelihood = log_likelihood_tmp
         i += 1
@@ -49,6 +57,13 @@ def train_logistic_regression(data_class, data_scores, learning_rate=5.0, conver
 
 
 def predict_logistic_regression(model, data_scores):
+    """
+    Function for prediction with a logistic regression model
+    
+    Args:
+    model (model as produced by train_logistic_regression): Model to use for predictions
+    data_scores (np.array([])): Array of scores to transform into probabilities.
+    """
     probabilities = np.array([sigmoid(model['b_0'] + model['b_1'] * item_score) for item_score in data_scores])
     return(probabilities)
 
