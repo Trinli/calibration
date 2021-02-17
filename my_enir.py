@@ -16,12 +16,38 @@ import numpy as np
 from scipy.interpolate import interp1d
 
 
-def train_enir(data_class, data_scores, y_min=0.0, y_max=1.0, no_gaps=False, laplace_smoothing=False, max_likelihood=False, pruning=True):
-    # 'laplace_smoothing' causes bins to have frequencies that are smoothed, but not affected by the lambda.
-    # 'max_likelihood' follows the same solution path as ENIR but sets the bin probabilities to the
-    # relative frequency in the bins (i.e. "L0-regularization").
-    # First a bunch of auxiliary functions:
+def train_enir(data_class,
+               data_scores,
+               y_min=0.0,
+               y_max=1.0,
+               no_gaps=False,
+               laplace_smoothing=False,
+               max_likelihood=False,
+               pruning=True):
+    """
+    Function for training ENIR model. This was created partly to learn how the model works,
+    partly to overcome the issue where the matlab-implementation provided by Naeini & al.
+    would produce values outside of [0, 1].
 
+    Args:
+    data_class (np.array([bool])): Array of class-labels for samples. True indicates a
+     positive sample.
+    data_scores (np.array([float])): Array of scores for samples.
+    y_min (float): Smallest probability predicted by model. Model capped at this value.
+     In [0, 1[.
+    y_max (float): Largest probability predicted by model. In ]y_min, 1].
+    no_gaps (bool): Setting this to True will result in model where there are no
+     gaps between bins. Setting this to False will leave gaps between bins and new
+     samples falling in these gaps get an estimate from linear interpolation.
+    laplace_smoothing (bool): Whether +1 smoothing should be used in bins.
+    max_likelihood (bool):
+    pruning (bool): 
+
+    'laplace_smoothing' causes bins to have frequencies that are smoothed, but not affected by the lambda.
+    'max_likelihood' follows the same solution path as ENIR but sets the bin probabilities to the
+    relative frequency in the bins (i.e. "L0-regularization").
+    """
+    # First a bunch of auxiliary functions:
     def update_probabilities(probabilities, slopes, delta_lambda):
         # Version in pseudo-code in paper.
         new_probabilities = []
@@ -174,15 +200,9 @@ def train_enir(data_class, data_scores, y_min=0.0, y_max=1.0, no_gaps=False, lap
     violations = get_violations(probabilities)
     print("Training my_enir.")
     while(sum(violations) > 0):
-        # while(lambda_tmp < 1000 and len(probabilities) > 2):  # This criterion often ends up with very few bins as one merge iteration may cover multiple bins!
-        # for j in range(36):
         # Find the bin(s) with the smallest lambda, i.e. the one to be merged next.
         slopes = get_slopes(violations, probabilities)
         lambda_values = get_lambda_values(probabilities, slopes, lambda_tmp)
-        # QUICK FIX (SEE PAGE 4 IN NIR-PAPER) (next lambda-value must be larger than previous)
-        # The row below must be wrong. It would gauarantee that the if-statement below always
-        # evaluates to True.
-        # lambda_values = [item if item > lambda_tmp else np.inf for item in lambda_values]
         # Next merging value:
         lambda_min = min(lambda_values)
         if(lambda_min < lambda_tmp):
@@ -193,13 +213,6 @@ def train_enir(data_class, data_scores, y_min=0.0, y_max=1.0, no_gaps=False, lap
         # Function update_probabilities() affects the input object... i.e. new_probabilities and
         # probabilities will be identical.
         probabilities = update_probabilities(probabilities, slopes, lambda_min - lambda_tmp)
-        # if(max([item['p'] for item in probabilities]) > 1.0):
-        #     break
-        # else:
-        #     probabilities = new_probabilities
-        # probabilities = update_probabilities(probabilities, slopes, lambda_tmp - lambda_min)
-        # ERROR RIGHT HERE!
-        # The merge_bins() -function does not update the probabilities correctly according to the required formulas.
         probabilities = merge_bins(probabilities, bins_to_merge)
         lambda_tmp = lambda_min
         # bic_score = get_bic_score(probabilities)  # Min-max the zeroes and ones out.
@@ -210,12 +223,10 @@ def train_enir(data_class, data_scores, y_min=0.0, y_max=1.0, no_gaps=False, lap
         if no_gaps:
             for i in range(len(probabilities)):
                 if i == 0:
-                    # model_boundaries.append(-np.inf)  # Should this be zero-indexed?
                     model_boundaries.append(probabilities[0]['score_min'])
                     model_boundaries.append((probabilities[0]['score_max'] + probabilities[1]['score_min']) / 2)
                 elif i == len(probabilities) - 1:
                     model_boundaries.append((probabilities[i - 1]['score_max'] + probabilities[i]['score_min']) / 2)
-                    # model_boundaries.append(np.inf)
                     model_boundaries.append(probabilities[i]['score_max'])
                 else:
                     model_boundaries.append((probabilities[i - 1]['score_min'] + probabilities[i]['score_min']) / 2)
@@ -245,10 +256,7 @@ def train_enir(data_class, data_scores, y_min=0.0, y_max=1.0, no_gaps=False, lap
         # Messy implementation with bic-score! Clean up.
         bic_score = get_bic_score(probabilities, model_probabilities)
         model_tmp = interp1d(x=model_boundaries, y=model_probabilities, bounds_error=False, assume_sorted=True, fill_value=(y_min, y_max))
-        # model_tmp._fill_value_below = min(model_probabilities)
-        # model_tmp._fill_value_above = max(model_probabilities)
         models.append({'model': model_tmp, 'bic_score': bic_score})
-        # print(len(probabilities))
         violations = get_violations(probabilities)
     # Estimate bayes factors instead of BIC scores:
     min_bic_score = min([item['bic_score'] for item in models])
@@ -261,6 +269,18 @@ def train_enir(data_class, data_scores, y_min=0.0, y_max=1.0, no_gaps=False, lap
 
 
 def predict_enir(models, data_scores, model_averaging=True, model_idx=-1):
+    """
+    Function for predicting probabilities using an ENIR model.
+
+    Args:
+    models: Ensemble of NIR models as produced by train_enir().
+    data_scores (np.array([float])): Sample scores to be converted
+     to probabilities.
+    model_averaging (bool): If set to False, the predictions are made only
+     based on one model in the ensemble defined by model_idx.
+    model_idx (int): Index of model in ensemble to use if model_averaging is
+     set to False.
+    """
     # Start by predicting using only the last model. The model is an interpolation model.
     if not model_averaging:
         probabilities = models[model_idx]['model'](data_scores)  # Last model is full IR fit.
@@ -271,9 +291,3 @@ def predict_enir(models, data_scores, model_averaging=True, model_idx=-1):
         normalizing_factor = sum([np.exp(item['bayes_factor'] / -2) for item in models])
         probabilities = np.array([item['model'](data_scores) * np.exp(item['bayes_factor'] / -2) / normalizing_factor for item in models]).sum(0)
     return(probabilities)
-
-# Test 2 here produces a result that is different from the isotonic regression model produced by
-# sklearn.isotonic. The min and max scores (bin boundaries) for the first three bins match in both
-# cases. The 'p'-values for this version match the natural frequency of positive samples in the bins,
-# hence, the probabilities for the sklearn.isotonic-version must be wrong for bin 2 and 3.
-# ?!?
