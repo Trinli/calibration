@@ -15,10 +15,20 @@ from scipy.interpolate import interp1d
 
 
 def train_enir_n(data_class, data_scores, no_gaps=False, smoothing=0):
-    # Function for training enir model.
-    # Set 'smoothing' to 1 for Laplace-smoothing or 1/2 for Krichesky-Trofimov
-    # Perhaps opt for an approach where we allow for a violation only if there are at least
-    # M samples in a violating bin.
+    """
+    Function for training enir model following Naeini & al. 2015.
+    Perhaps opt for an approach where we allow for a violation only if there are at least
+    M samples in a violating bin.
+    
+    Args:
+    data_class (np.array([])): Array of class labels. True indicates a positive sample.
+    data_scores (np.array([])): Array of scores for samples.
+    no_gaps (bool): Set this to True for a model where there are no
+     gaps between bins. Otherwise the regions between bins will be defined by
+     linear interpolation. There is not really solid theory pointing one way
+     or the other concerning this.
+    smoothing (float): Set to 1 for Laplace-smoothing, 1/2 for Krichesky-Trofimov.
+    """
     # 1. Sort samples:
     print("Sorting.")
     data_idx = np.argsort(data_scores)
@@ -159,6 +169,18 @@ def train_enir_n(data_class, data_scores, no_gaps=False, smoothing=0):
 
 
 def predict_enir_n(models, data_scores, model_averaging=True, model_idx=-1):
+    """
+    Function for predicting probabilities using the enir model
+    
+    Args:
+    models (model set as produced by train_enir_n): Model ensemble to use for predictions
+    data_scores (np.array([])): Array of scores to turn into probability
+    model_averaging (bool): Setting this to False will result in using only one
+     model in the enir-ensemble defined by the model_idx parameter, i.e. the one that 
+     is identical to nir (near-isotonic regression). Setting this to True will use an 
+     ensemble of nir-models (i.e. enir).
+    model_idx (int): Index of model to use if no model averaging is desired.
+    """
     # Start by predicting using only the last model. The model is an interpolation model.
     if model_averaging:
         # DUE TO NUMERIC INSTABILITY, THE TOTAL WEIGHT MIGHT IN RARE CASES EXCEED 1 SLIGHTLY.
