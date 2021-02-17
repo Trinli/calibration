@@ -1,14 +1,16 @@
-#  Some code to test reliably calibrated isotonic regression.
-#  sklearn.isotonic.IsotonicRegression produces a function that
-#  interpolates values falling _between_ bins of the calibration
-#  set.
-#  Although it sounds plausible, there is no scientific justification
-#  for this (no academic paper on it, only for prediction). Initial
-#  tests indicate that it produces better testing set auc-roc and
-#  mse this way instead of splitting the gaps between neighboring bins.
-#  However, from theoretical analysis, splitting the gaps between
-#  neighboring bins is easier as all input scores and output probabilities
-#  can then be modeled using Beta-distributions.
+"""
+Some code to test reliably calibrated isotonic regression.
+sklearn.isotonic.IsotonicRegression produces a function that
+interpolates values falling _between_ bins of the calibration
+set.
+Although it sounds plausible, there is no scientific justification
+for this (no academic paper on it, only for prediction). Initial
+tests indicate that it produces better testing set auc-roc and
+mse this way instead of splitting the gaps between neighboring bins.
+However, from theoretical analysis, splitting the gaps between
+neighboring bins is easier as all input scores and output probabilities
+can then be modeled using Beta-distributions.
+"""
 
 import numpy as np
 import pickle
@@ -49,15 +51,19 @@ def predict(model, data_scores):
 
 
 def estimate_performance(model, data_class, data_scores):
-    # Function for estimating testing set performance of model
-    # Estimate probabilities:
-    try:  # If it is an IsotonicRegression-model
-        data_probabilities = model.predict(T=data_scores)
-    except:  # If it is an interpolation model (interp1d) or kNN
-        try:  # interpolation model:
-            data_probabilities = model(data_scores)
-        except:  # kNN-model
-            data_probabilities = model.predict_proba(X=data_scores)[:, 1]
+    """
+    Function for estimating performance metrics (AUC-ROC and MSE)
+    of model.
+    
+    Args:
+    model {IsotonicRegression, interpolation omdel, kNN-model}:
+     model used to convert scores to probabilities.
+    data_class (np.array([])): Array of class labels. True indicates
+     positive sample, False negative.
+    data_scores (np.array([])): Scores produced e.g. by machine
+     learning model for samples.
+    """
+    data_probabilities = predict(model. data_scores)
     # Estimate mean squared error:
     mse = sum((data_class - data_probabilities)**2) / len(data_class)
     # Estimate AUC-ROC:
@@ -67,8 +73,18 @@ def estimate_performance(model, data_class, data_scores):
 
 
 def credible_interval(k, n, confidence_level=.95, tolerance=1e-6):
-    # Function for estimating width of credible interval.
-    # Find the highest posterior density interval using binary search.
+    """
+    Auxiliary function for estimating width of credible interval.
+    Finds the highest posterior density interval using binary search.
+    
+    Args:
+    k (int): Number of positive samples
+    n (int): Number of samples
+    confidence_level (float): Probability mass that has to fall within
+     the credible intervals. In ]0, 1].
+    tolerance (float): Upper limit for tolerance of probability mass
+     within credible interval.
+    """
     p_min_lower = float(0)
     p_middle = p_min_upper = p_max_lower = k / float(n)
     p_max = p_max_upper = float(1)
@@ -116,15 +132,22 @@ def credible_interval(k, n, confidence_level=.95, tolerance=1e-6):
 
 
 def modify_model(model):
-    # By default, sklearn.isotonic.IsotonicRegression produces an interpolation
-    # model that is piecewise constant, but where the values falling between
-    # bins are determined by an interpolation between two bins instead of being
-    # mapped to one of the bins.
-    # This function removes the gaps between the bins resulting in a function that
-    # is piecewise constant for all x.
-    # By setting the next bin boundary equal to the previous one, we define the
-    # space entirely (leaving no gaps). The lower boundary belongs to *this bin,
-    # the upper to the next.
+    """
+    Auxiliary function for reliably calibrated isotonic regression.
+    By default, sklearn.isotonic.IsotonicRegression produces an interpolation
+    model that is piecewise constant, but where the values falling between
+    bins are determined by an interpolation between two bins instead of being
+    mapped to one of the bins.
+    This function removes the gaps between the bins resulting in an 
+    interpolation model that is piecewise constant for all x.
+    By setting the next bin boundary equal to the previous one, we define the
+    space entirely (leaving no gaps). The lower boundary belongs to *this bin,
+    the upper to the next.
+    
+    Args:
+    model (IsotonicRegression): Model as produced by sklearn.isotonic.IsotonicRegression
+     or interpolation model.
+    """
     try:
         # If model is of class sklearn.isotonic.IsotonicRegression
         x = model.f_.x
@@ -133,8 +156,6 @@ def modify_model(model):
         # If model is of class scipy.interpolate.interp1d
         x = model.x
         y = model.y
-    # print("1. ---------")
-    # print(y)
     if(y[0] == y[1]):  # The borders are sometimes "off by one"...
         for i in range(int(len(x) / 2)):
             # Make corrections from y[1] & x[1]
@@ -154,80 +175,19 @@ def modify_model(model):
                 x[i * 2 + 1] = x_new
             except IndexError:  # If there is an odd number of items in x
                 pass
-    # print("2. ---------")
-    # print(y)
     interpolation_model = interp1d(x=x, y=y, bounds_error=False, assume_sorted=True)
-    # print("2.5 ---------")  # SOMETHING WEIRD HAPPENS AT THE LINE ABOVE.
-    # print(interpolation_model.y)
     interpolation_model._fill_value_below = min(y)
     interpolation_model._fill_value_above = max(y)
-    # print("3. ---------")
-    # print(interpolation_model.y)
     return(interpolation_model)
 
-# WHAT'S THIS BELOW?
-# probabilities = load_pickle('probabilities.pickle')
-# # Set parameter:
-# lambda_tmp = 0.0
-# models = []
-# violations = get_violations(probabilities)
-# while(sum(violations) > 0):
-#     # while(lambda_tmp < 1000 and len(probabilities) > 2):  # This criterion often ends up with very few bins as one merge iteration may cover multiple bins!
-#     # for j in range(36):
-#     # Find the bin(s) with the smallest lambda, i.e. the one to be merged next.
-#     slopes = get_slopes(violations, probabilities)
-#     lambda_values = get_lambda_values(probabilities, slopes, lambda_tmp)
-#     # QUICK FIX (SEE PAGE 4 IN NIR-PAPER) (next lambda-value must be larger than previous)
-#     # The row below must be wrong. It would gauarantee that the if-statement below always
-#     # evaluates to True.
-#     # lambda_values = [item if item > lambda_tmp else np.inf for item in lambda_values]
-#     # Next merging value:
-#     lambda_min = min(lambda_values)
-#     if(lambda_min < lambda_tmp):
-#         print("Anomaly with lambda-values.")
-#         break
-#     # Find all matching occurrences in lambda_values:
-#     bins_to_merge = [i for i, lambda_value in enumerate(lambda_values) if lambda_value == lambda_min]
-#     # Function update_probabilities() affects the input object... i.e. new_probabilities and
-#     # probabilities will be identical.
-#     probabilities = update_probabilities(probabilities, slopes, lambda_min - lambda_tmp)
-#     # if(max([item['p'] for item in probabilities]) > 1.0):
-#     #     break
-#     # else:
-#     #     probabilities = new_probabilities
-#     # probabilities = update_probabilities(probabilities, slopes, lambda_tmp - lambda_min)
-#     # ERROR RIGHT HERE!
-#     # The merge_bins() -function does not update the probabilities correctly according to the required formulas.
-#     probabilities = merge_bins(probabilities, bins_to_merge)
-#     lambda_tmp = lambda_min
-#     bic_score = get_bic_score(probabilities)  # Min-max the zeroes and ones out.
-#     # Format stuff for creating interpolation model:
-#     model_boundaries = []
-#     model_probabilities = []
-#     # THE CODE BELOW REMOVES THE GAPS BETWEEN BINS. THIS IS NOT NECESSARILY DESIRED.
-#     for i in range(len(probabilities)):
-#         if i == 0:
-#             # model_boundaries.append(-np.inf)  # Should this be zero-indexed?
-#             model_boundaries.append(probabilities[0]['score_min'])
-#             model_boundaries.append((probabilities[0]['score_max'] + probabilities[1]['score_min']) / 2)
-#         elif i == len(probabilities) - 1:
-#             model_boundaries.append((probabilities[i - 1]['score_max'] + probabilities[i]['score_min']) / 2)
-#             # model_boundaries.append(np.inf)
-#             model_boundaries.append(probabilities[i]['score_max'])
-#         else:
-#             model_boundaries.append((probabilities[i - 1]['score_min'] + probabilities[i]['score_min']) / 2)
-#             model_boundaries.append((probabilities[i]['score_max'] + probabilities[i + 1]['score_min']) / 2)
-#         model_probabilities.append(probabilities[i]['p'])
-#         model_probabilities.append(probabilities[i]['p'])
-#     model_tmp = interp1d(x=model_boundaries, y=model_probabilities, bounds_error=False, assume_sorted=True, fill_value=(0.0, 1.0))
-#     # model_tmp._fill_value_below = min(model_probabilities)
-#     # model_tmp._fill_value_above = max(model_probabilities)
-#     models.append({'model': model_tmp, 'bic_score': bic_score})
-#     print(len(probabilities))
-#     violations = get_violations(probabilities)
 
-def plot_intervals(data, credible_intervals, file_name="plot.png", label="Credible intervals"):
-    # Function for plotting the score-probability mapping with credible intervals.
+def plot_intervals(data, credible_intervals,
+                   file_name="plot.png",
+                   label="Credible intervals"):
+    """
+    Function for plotting the score-probability mapping with
+    credible intervals.
+    """
     # Plot points
     plt.axes().set_aspect('equal')
     plt.xlim([0, 1.01])
@@ -246,7 +206,8 @@ def plot_intervals(data, credible_intervals, file_name="plot.png", label="Credib
     plt.gcf().clear()
 
 
-def plot_reliability_diagram(model, data_scores, data_class, label="Reliability diagram",
+def plot_reliability_diagram(model, data_scores, data_class,
+                             label="Reliability diagram",
                              file_name="reliability_diagram.png"):
     # Function for plotting reliability diagrams.
     # Remove the gaps between bins:
@@ -277,10 +238,15 @@ def plot_reliability_diagram(model, data_scores, data_class, label="Reliability 
 
 
 def correct_for_point_bins(x, y):
-    # Iff there is e.g. 2 samples that map to 0.5 and they have different classes but the exact same scores,
-    # then these will create a bin with zero width and only one entry in x and y for the isotonic regression
-    # and the interpolation model. Further functions don't know how to treat this, so we will
-    # correct for that in this function.
+    """
+    Auxiliary function for reliably calibrated isotonic regression
+    (train_rcir).
+    Iff there is e.g. 2 samples that map to 0.5 and they have different
+    classes but the exact same scores, then these will create a bin
+    with zero width and only one entry in x and y for the isotonic regression
+    and the interpolation model. Further functions don't know how to handle
+    this, so we will correct for that in this function.
+    """
     if(y[0] == y[1]):
         for i in range(int(len(y) / 2)):
             try:
@@ -306,8 +272,17 @@ def correct_for_point_bins(x, y):
 
 
 def expected_calibration_error(data_class, data_probabilities, k=10):
-    # This function calculates the expected calibration error (ECE) as described
-    # in Naeini & al. 2015 with k=10 by default..
+    """
+    This function calculates the expected calibration error (ECE) as
+    described in Naeini & al. 2015 with k=10 by default..
+
+    Args:
+    data_class (np.array([])): Array of class of data. True indicates positive
+     class, False negative.
+    data_probabilities (np.array([])): Array of predicted probabilities.
+    k (int): Number of bins to use for estimating ECE. Needs to be in
+     some sort of proportion to dataset size.
+    """
     order_idx = np.argsort(data_probabilities)
     ordered_data_class = data_class[order_idx]
     ordered_data_probabilities = data_probabilities[order_idx]
@@ -319,15 +294,14 @@ def expected_calibration_error(data_class, data_probabilities, k=10):
         # Average predicted probability
         e_i = np.mean(ordered_data_probabilities[int(i * n_samples / k): int((i + 1) * n_samples / k)])
         score += float(abs(o_i - e_i)) / k
-        # print(o_i)
-        # print(e_i)
-        # print(score)
     return(score)
 
 
 def maximum_calibration_error(data_class, data_probabilities, k=10):
-    # This function calculates the maximum calibration error (MCE) as described
-    # by Naeini & al. 2015 with k=10 by default.
+    """
+    This function calculates the maximum calibration error (MCE) as described
+    by Naeini & al. 2015 with k=10 by default.
+    """
     order_idx = np.argsort(data_probabilities)
     ordered_data_class = data_class[order_idx]
     ordered_data_probabilities = data_probabilities[order_idx]
@@ -339,9 +313,6 @@ def maximum_calibration_error(data_class, data_probabilities, k=10):
         err = abs(o_i - e_i)
         if(err > max_err):
             max_err = err
-        # print(i)
-        # print(o_i)
-        # print(e_i)
     return(max_err)
 
 
@@ -369,12 +340,12 @@ def expected_bin_error(data_class, data_probabilities):
     return(err)
 
 
-def bootstrap_isotonic_regression(data_class, data_scores, sampling_rate=.95, n_models=200, y_min=0, y_max=1):
+def bootstrap_isotonic_regression(data_class, data_scores,
+                                  sampling_rate=.95, n_models=200,
+                                  y_min=0, y_max=1):
     # Function for training an ensemble of isotonic regression models
     models = []
     n_samples = data_class.shape[0]
-    # print(sampling_rate)
-    # print(n_samples)
     for i in range(n_models):
         tmp_model = IsotonicRegression(y_min=y_min, y_max=y_max, out_of_bounds='clip')
         idx = np.random.randint(low=0, high=n_samples, size=int(sampling_rate * n_samples))
@@ -392,12 +363,27 @@ def bootstrap_isotonic_regression_predict(models, data_scores):
     return(probabilities)
 
 
-# SHOULDN'T THIS BE DONE WITHOUT VALIDATION DATA? I.E. MERGES BASED ON TRAINING DATA.
-def train_rcir(training_class, training_scores,  # , validation_class, validation_scores,
-               credible_level=.95, d=1, y_min=0, y_max=1, merge_criterion='auc_roc'):
-    # Function for training reliably calibrated isotonic regression (RCIR)
-    # Returns an RCIR-model
-    # First, create an ordinary isotonic regression model
+def train_rcir(training_class, training_scores,
+               credible_level=.95, d=1, y_min=0,
+               y_max=1, merge_criterion='auc_roc'):
+    """
+    Function for training reliably calibrated isotonic regression (RCIR)
+    as described in the upcoming PAKDD 2021-paper.
+
+    Args:
+    training_class (np.array([])): Array of classes for training data.
+    training_scores (np.array([])): Array of scores for training data
+    credible_level (float): Probability mass required to fall within
+     credible interval. In [0, 1].
+    d (float): Width of largest allowed credible interval containing
+     probability mass specified by credible_level. In ]0, 1].
+    y_min (float): Value of smallest prediction allowed by model. Here
+     to allow preventing problems from arising due to zero-probabilities
+     when estimating e.g. likelihoods. In [0,1[
+    y_max (float): Largest prediction allowed by model. Value in ]y_min, 1].
+    merge_criterion {'auc_roc', 'mse'}: Criterion to use for bin merges
+     after isotonic regression has resolved all monotonicity conflicts.
+    """
     isotonic_regression_model = IsotonicRegression(y_min=y_min, y_max=y_max, out_of_bounds='clip')
     isotonic_regression_model.fit(X=training_scores, y=training_class)
     # Extract the interpolation model we need:
@@ -407,20 +393,25 @@ def train_rcir(training_class, training_scores,  # , validation_class, validatio
     tmp = correct_for_point_bins(tmp_x, tmp_y)
     x = tmp['x']
     y = tmp['y']
-    # Use new boundaries to create an interpolation model that does the heavy lifting of
-    # reliably calibrated isotonic regression:
+    # Use new boundaries to create an interpolation model that does
+    # the heavy lifting of reliably calibrated isotonic regression:
     interpolation_model = interp1d(x=x, y=y, bounds_error=False)
     interpolation_model._fill_value_below = min(y)
     interpolation_model._fill_value_above = max(y)
     training_probabilities = interpolation_model(training_scores)
-    # The following array contains all information defining the IR transformation
+    # The following array contains all information defining the 
+    # IR transformation
     bin_summary = np.unique(training_probabilities, return_counts=True)
     credible_intervals = [credible_interval(np.round(p * n), n) for (p, n) in
                           zip(bin_summary[0], bin_summary[1])]
-    width_of_intervals = np.array([row['p_max'] - row['p_min'] for row in credible_intervals])
-    rcir_model = {'model': interpolation_model, 'credible level': credible_level,
-                  'credible intervals': credible_intervals, 'width of intervals': width_of_intervals,
-                  'bin summary': bin_summary, 'd': d}
+    width_of_intervals = np.array([row['p_max'] - row['p_min'] \
+        for row in credible_intervals])
+    rcir_model = {'model': interpolation_model,
+                  'credible level': credible_level,
+                  'credible intervals': credible_intervals,
+                  'width of intervals': width_of_intervals,
+                  'bin summary': bin_summary,
+                  'd': d}
     while(max(rcir_model['width of intervals']) > d):
         # Merge one more bin.
         rcir_model = merge_bin(rcir_model, training_class, training_scores,
@@ -428,8 +419,20 @@ def train_rcir(training_class, training_scores,  # , validation_class, validatio
     return(rcir_model)
 
 
-def train_rcir_cv(training_class, training_scores, validation_class, validation_scores,
-                  credible_level=.95, y_min=0, y_max=1, merge_criterion='auc_roc'):
+def train_rcir_cv(training_class, training_scores,
+                  validation_class, validation_scores,
+                  credible_level=.95, y_min=0, y_max=1,
+                  merge_criterion='auc_roc'):
+    """
+    Variant of reliably calibrated isotonic regression where the maximum
+    allowed credible interval width is defined by maximum performance
+    on validation set.
+    
+    Args:
+    (see train_rcir())
+    validation_class (np.array([])): Array of class labels for validation set.
+    validation_score (np.array([])): Array of scores for validation set.
+    """
     isotonic_regression_model = IsotonicRegression(y_min=y_min, y_max=y_max, out_of_bounds='clip')
     isotonic_regression_model.fit(X=training_scores, y=training_class)
     models = []
@@ -464,12 +467,11 @@ def train_rcir_cv(training_class, training_scores, validation_class, validation_
     return(models[best_model_idx][1])
 
 
-def merge_bin(rcir_model, data_class, data_scores, merge_criterion='auc_roc'):  # Pass validation set here?
-    # Function for performing one bin merge in RCIR
-    # Exception handling for first & last bins? Something else?
-    # Python passes pointers and not values by default. Do we need to take this into consideration?
-    # Not adjust the inputs and return a new object?
-    # Extract all fields from rcir_model (or something)
+def merge_bin(rcir_model, data_class, data_scores, merge_criterion='auc_roc'):
+    """
+    Auxiliary function for train_rcir. Performs one bin merge.
+    Function could be hidden.
+    """
     width_of_intervals = rcir_model['width of intervals']
     x = rcir_model['model'].x
     y = rcir_model['model'].y
@@ -849,10 +851,12 @@ def plot_metrics_at(data_class, bbq_prob, other_prob, data_scores, metric='mse',
 
 def plot_calibration_mapping(calibration_model, min_score, max_score, resolution=1000,
                              file_name='calibration_mapping.png'):
-    # Function for plotting what probabilities different scores get mapped to.
-    # "General purpose prediction function"
-    # PERHAPS ADD PROBABILITY DISTRIBUTION OF TRAINING DATA (OR TESTING?)?
-    # WOULD INDICATE HOW MANY SAMPLES FALL INTO ONE BIN.
+    """
+    Function for plotting what probabilities different scores get mapped to.
+    "General purpose prediction function"
+    Perhaps add probability distribution of training data (or testing?)?
+    Would indicate how many samples fall into one bin.
+    """
     diff = max_score - min_score
     scores = [min_score + i * diff / float(resolution) for i in range(resolution + 1)]
     try:  # IR model
@@ -885,6 +889,3 @@ def plot_calibration_mapping(calibration_model, min_score, max_score, resolution
     plt.title("Calibration mapping")
     plt.savefig(file_name)
     plt.gcf().clear()
-
-
-
